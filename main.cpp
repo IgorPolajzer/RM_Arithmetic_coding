@@ -1,7 +1,8 @@
 #include <complex>
 #include <iostream>
 #include <fstream>
-#include <math.h>
+#include <map>
+#include <cmath>
 #include <vector>
 
 using namespace std;
@@ -13,47 +14,45 @@ struct TableEntry {
     int upperBound;
 };
 
-int contains(vector<TableEntry> table, char character) {
-    for (int i = 0; i < table.size(); i++) {
-        if (table[i].character == character) return i;
-    }
-
-    return -1;
-}
-
-vector<TableEntry> initalizeTable(ifstream &file) {
+map<char, TableEntry> initalizeTable(const string& fileName) {
     char c;
-    vector<TableEntry> table;
+    map<char, TableEntry> table;
+    ifstream file(fileName, ios::binary | ios::in);
     int lowerBound = 0;
 
     while (file.get(c))
     {
-        int index = contains(table, c);
-        if(index == -1) {
+        if(!table.contains(c)) {
             int frequency = 1;
             int upperBound = lowerBound + frequency;
 
-            table.push_back(TableEntry(c, frequency, lowerBound, upperBound));
+            table[c] = TableEntry(c, frequency, lowerBound, upperBound);
             lowerBound = upperBound;
 
         } else {
-            if (table.size() >= index) {
-                table[index].frequency++;
-                table[index].upperBound++;
-                lowerBound = table[index].upperBound;
-            } else {
-                cerr << "Table size is too small" << endl;
-            }
+            table[c].frequency++;
+            table[c].upperBound++;
+            lowerBound = table[c].upperBound;
         }
     }
 
     return table;
 }
 
-void compress(const string& fileName) {
+int getComulativeFrequency(const map<char, TableEntry>& table) {
+    int frequency = 0;
+
+    for (const auto & [ key, value ] : table) {
+        frequency += value.frequency;
+    }
+
+    return frequency;
+}
+
+void compress(const string& inputFile, const string& outputFile) {
     int bitSize;
-    vector<bool> binary;
-    ifstream f(fileName, ios::binary | ios::in);
+    ifstream input(inputFile, ios::binary);
+    ofstream output(outputFile, ios::binary);
 
     cout << "Specify the coder bitsize: ";
     cin >> bitSize;
@@ -63,93 +62,117 @@ void compress(const string& fileName) {
     int secondQuarter = (upperBound + 1) / 2;
     int firstQuarter = secondQuarter / 2;
     int thirdQuarter = firstQuarter * 3;
-    int cummulativeFrequency = 5; // TODO Number od characters in file
 
-    if (f.is_open()) {
+    map<char, TableEntry> table = initalizeTable(inputFile);
+    int cummulativeFrequency = getComulativeFrequency(table);
+
+    if (input.is_open() && output.is_open()) {
+        // Write file header.
+        output << bitSize;
+        for (auto & it : table) {output << it.first;}
+        for (auto & it : table) {output << it.second.frequency;}
+
         char c;
+        int E3_counter = 0;
 
-        vector<TableEntry> table = initalizeTable(f);
-
-        while (f.get(c)) // reads one char (1 byte) intro c.
+        while (input.get(c))
         {
-            // Extracts each bit from the byte.
-            for (int i = 7; i >= 0; i--)
-                // Shifts the byte to the right and masks with 1 to get the bit value.
-                    cout << ((c >> i) & 1);
-            cout << " ";
-        }
-    } else {
-        cerr << "Error opening file " << fileName << endl;
-    }
-}
+            int step = (upperBound - lowerBound + 1) / cummulativeFrequency;
+            upperBound = lowerBound + step * table[c].upperBound - 1;
+            lowerBound = lowerBound + step * table[c].lowerBound;
 
-void writeBinaryFile(const string& fileName, const vector<bool>& bits) {
-    ofstream f(fileName, ios::binary);
-    if (!f) {
-        cerr << "File '" << fileName << "' couldn't be opened." << endl;
-        return;
-    }
+            while (upperBound < secondQuarter || lowerBound >= secondQuarter) {
+                if (upperBound < secondQuarter) {
+                    lowerBound *= 2;
+                    upperBound = upperBound * 2 + 1;
+                    output << 0;
+                    for (int i = 0; i < E3_counter; i++) {
+                        output << 1;
+                    }
+                    E3_counter = 0;
+                }
 
-    unsigned char byte = 0;
-    int bitCount = 0;
-    for (bool bit : bits) {
-        // Shift the existing bits left and add the new one
-        byte = (byte << 1) | (bit ? 1 : 0);
-        bitCount++;
-
-        if (bitCount == 8) {
-            f.put(static_cast<char>(byte));
-            byte = 0;
-            bitCount = 0;
-        }
-    }
-
-    // Handle leftover bits (if not multiple of 8)
-    if (bitCount > 0) {
-        byte <<= (8 - bitCount); // pad with zeros on the right
-        f.put(static_cast<char>(byte));
-    }
-}
-
-vector<int> findBitset(vector<bool>& bits, string& bitSet) {
-    vector<int> indexes;
-    int firstBit = bitSet[0] - '0';
-
-    for (int i = 0; i < bits.size(); i++) {
-        if (bits[i] == firstBit && bits.size() - i >= bitSet.length()) {
-            bool match = true;
-
-            for (int j = 0; j < bitSet.length(); j++) {
-                if (bits[i + j] != bitSet[j] - '0') {
-                    match = false;
-                    break;
+                if (lowerBound >= secondQuarter) {
+                    lowerBound = 2 * (lowerBound - secondQuarter);
+                    upperBound = 2 * (upperBound - secondQuarter) + 1;
+                    output << 1;
+                    for (int i = 0; i < E3_counter; i++) {
+                        output << 0;
+                    }
+                    E3_counter = 0;
                 }
             }
 
-            if (match) {
-                indexes.push_back(i);
-                i += bitSet.length() - 1;
+            while (lowerBound >= firstQuarter && upperBound < thirdQuarter) {
+                lowerBound = 2 * (lowerBound - firstQuarter);
+                upperBound = 2 * (upperBound - firstQuarter) + 1;
+                E3_counter++;
             }
         }
-    }
 
-    return indexes;
+        if (lowerBound < firstQuarter) {
+            output << 0 << 1;
+            for (int i = 0; i < E3_counter; i++) {
+                output << 1;
+            }
+        } else {
+            output << 1 << 0;
+            for (int i = 0; i < E3_counter; i++) {
+                output << 0;
+            }
+        }
+    } else {
+        cerr << "Error opening one of the files: " << inputFile << ", " << outputFile << endl;
+    }
 }
 
-void swapBitset(vector<bool>& bits, string& bitSet, string& bitSetReplacement) {
-    if (bitSet.length() != bitSetReplacement.length()) {
-        cerr << "Bitset length mismatch." << endl;
-        return;
+map<char, TableEntry> parseHeader(ifstream& input, int &bitSize) {
+    char c;
+    string usedChars, stringBitSize;
+    map<char, TableEntry> table;
+
+    // Parse bit size (digits until first non-digit)
+    while (isdigit(input.peek())) {
+        input.get(c);
+        stringBitSize += c;
     }
-    if (bits.size() < bitSet.length()) {
-        cerr << "Bitset too large." << endl;
-        return;
+    bitSize = stoi(stringBitSize);
+
+    // Parse used characters (all non-digits)
+    while (isalpha(input.peek())) {
+        input.get(c);
+        usedChars += c;
     }
-    vector<int> indexes = findBitset(bits, bitSet);
-    for (int index : indexes) {
-        for (int i = index, j = 0; i < bitSetReplacement.length() + index; i++, j++) {
-            bits[i] = bitSetReplacement[j] - '0';
-        }
+
+    // Parse character frequencies.
+    int previousUpper = -1;
+    for (char ch : usedChars) {
+        input.get(c);
+        string freq(1, c);
+
+        int currentFreq = stoi(freq);
+        int lowerBound = previousUpper == - 1 ? 0 : previousUpper;
+        int upperBound = lowerBound * currentFreq;
+        table[ch] = TableEntry{ch, currentFreq, lowerBound, upperBound};
+        previousUpper = upperBound;
+    }
+
+    return table;
+}
+
+void decompress(const string& inputFile, const string& outputFile) {
+    ifstream input(inputFile, ios::binary);
+    ofstream output(outputFile, ios::binary);
+
+    if (input.is_open() && output.is_open()) {
+        // Parse the file header.
+        int field;
+        map<char, TableEntry> table = parseHeader(input, field);
+
+        char c;
+
+    } else {
+        cerr << "Error opening one of the files: " << inputFile << ", " << outputFile << endl;
     }
 }
 
@@ -163,13 +186,10 @@ int main(int argc, char* argv[]) {
     string inputFile = argv[2];
     string outputFile = argv[3];
 
-    // Bit search operation.
     if (operation == "c") {
-        compress(inputFile);
-    // Bit switch operation.
+        compress(inputFile, outputFile);
     } else if (operation == "d") {
-
-        //writeBinaryFile(outputFile, binaryfile);
+        decompress(inputFile, outputFile);
     }
 
     return 0;
