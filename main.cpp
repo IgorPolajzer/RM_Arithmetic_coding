@@ -1,22 +1,22 @@
 #include <complex>
 #include <iostream>
 #include <fstream>
-#include <map>
 #include <cmath>
-#include <vector>
+#include <tsl/ordered_map.h>
 
 using namespace std;
+using namespace tsl;
 
 struct TableEntry {
     char character;
-    int frequency;
-    int lowerBound;
-    int upperBound;
+    mutable int frequency;
+    mutable int lowerBound;
+    mutable int upperBound;
 };
 
-map<char, TableEntry> initalizeTable(const string& fileName) {
+ordered_map<char, TableEntry> initalizeTable(const string& fileName) {
     char c;
-    map<char, TableEntry> table;
+    ordered_map<char, TableEntry> table;
     ifstream file(fileName, ios::binary | ios::in);
     int lowerBound = 0;
 
@@ -39,7 +39,7 @@ map<char, TableEntry> initalizeTable(const string& fileName) {
     return table;
 }
 
-int getComulativeFrequency(const map<char, TableEntry>& table) {
+int getComulativeFrequency(const ordered_map<char, TableEntry>& table) {
     int frequency = 0;
 
     for (const auto & [ key, value ] : table) {
@@ -63,14 +63,14 @@ void compress(const string& inputFile, const string& outputFile) {
     int firstQuarter = secondQuarter / 2;
     int thirdQuarter = firstQuarter * 3;
 
-    map<char, TableEntry> table = initalizeTable(inputFile);
+    ordered_map<char, TableEntry> table = initalizeTable(inputFile);
     int cummulativeFrequency = getComulativeFrequency(table);
 
     if (input.is_open() && output.is_open()) {
         // Write file header.
-        output << bitSize;
-        for (auto & it : table) {output << it.first;}
-        for (auto & it : table) {output << it.second.frequency;}
+        output << bitSize << ",";
+        for (auto & it : table) {output << it.first << ",";}
+        for (auto & it : table) {output << it.second.frequency << ",";}
 
         char c;
         int E3_counter = 0;
@@ -126,10 +126,10 @@ void compress(const string& inputFile, const string& outputFile) {
     }
 }
 
-map<char, TableEntry> parseHeader(ifstream& input, int &bitSize) {
+ordered_map<char, TableEntry> parseHeader(ifstream& input, int &bitSize) {
     char c;
-    string usedChars, stringBitSize;
-    map<char, TableEntry> table;
+    string stringBitSize;
+    ordered_map<char, TableEntry> table;
 
     // Parse bit size (digits until first non-digit)
     while (isdigit(input.peek())) {
@@ -141,19 +141,23 @@ map<char, TableEntry> parseHeader(ifstream& input, int &bitSize) {
     // Parse used characters (all non-digits)
     while (isalpha(input.peek())) {
         input.get(c);
-        usedChars += c;
+        table[c] = TableEntry{c, -1, -1, -1};
     }
 
     // Parse character frequencies.
     int previousUpper = -1;
-    for (char ch : usedChars) {
+    for (auto & it : table) {
         input.get(c);
         string freq(1, c);
 
         int currentFreq = stoi(freq);
         int lowerBound = previousUpper == - 1 ? 0 : previousUpper;
-        int upperBound = lowerBound * currentFreq;
-        table[ch] = TableEntry{ch, currentFreq, lowerBound, upperBound};
+        int upperBound = lowerBound + currentFreq;
+
+        it.second.frequency = currentFreq;
+        it.second.lowerBound = lowerBound;
+        it.second.upperBound = upperBound;
+
         previousUpper = upperBound;
     }
 
@@ -167,7 +171,7 @@ void decompress(const string& inputFile, const string& outputFile) {
     if (input.is_open() && output.is_open()) {
         // Parse the file header.
         int field;
-        map<char, TableEntry> table = parseHeader(input, field);
+        ordered_map<char, TableEntry> table = parseHeader(input, field);
 
         char c;
 
