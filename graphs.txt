@@ -1,0 +1,24 @@
+test_files/alice30.txt -c
+Compression time: 0.223664 s
+Compression ratio: 0.551348
+files/output.bin -d
+Decompression time: 0.202142 s
+
+test_files/assassin.wav -c
+Compression time: 0.402745 s
+Compression ratio: 0.51037
+files/output.bin -d
+Decompression time: 0.451172 s
+
+test_files/lena.bmp -c
+Compression time: 3.13056 s
+Compression ratio: 0.870251
+files/output.bin -d
+Decompression time: 2.26847 s
+
+test_files/lorem.txt -c
+Compression time: 0.0797821 s
+Compression ratio: 0.51698
+files/output.bin -d
+Decompression time: 0.0492144 s
+

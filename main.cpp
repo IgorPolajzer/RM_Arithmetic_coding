@@ -1,9 +1,12 @@
+#include <chrono>
 #include <iostream>
 #include <fstream>
 #include <tsl/ordered_map.h>
 
 using namespace std;
 using namespace tsl;
+
+//ofstream stat("graphs.txt", std::ios::app);
 
 struct TableEntry {
     char character;
@@ -81,12 +84,11 @@ uint64_t getComulativeFrequency(const ordered_map<char, TableEntry>& table) {
 }
 
 void compress(const string& inputFile, const string& outputFile) {
-    int bitSize;
+    auto start = std::chrono::high_resolution_clock::now();
+
+    int bitSize = 32;
     ifstream input(inputFile, ios::binary);
     ofstream output(outputFile, ios::binary);
-
-    cout << "Specify the coder bitsize: ";
-    cin >> bitSize;
 
     uint64_t lowerBound = 0;
     uint64_t upperBound = (1ULL << (bitSize - 1)) - 1; //pow(2, bitSize - 1) - 1;
@@ -162,6 +164,18 @@ void compress(const string& inputFile, const string& outputFile) {
         }
 
         flushBits(output);
+
+        /*auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = end - start;
+
+        // Print info for graphs:
+        ifstream in(inputFile, ios::binary | ios::ate);
+        ifstream out(outputFile, ios::binary | ios::ate);
+        auto inputSize = in.tellg();
+        auto outputSize = out.tellg();
+
+        //stat << "Compression time: " << elapsed.count() << " s\n";
+        stat << "Compression ratio: " << double(outputSize) / inputSize << "\n";*/
     } else {
         cerr << "Error opening one of the files: " << inputFile << ", " << outputFile << endl;
     }
@@ -205,6 +219,8 @@ char getCharFromTable(ordered_map<char, TableEntry>& table, int v) {
 }
 
 void decompress(const string& inputFile, const string& outputFile) {
+    //auto start = std::chrono::high_resolution_clock::now();
+
     ifstream input(inputFile, ios::binary);
     ofstream output(outputFile, ios::binary);
 
@@ -256,6 +272,10 @@ void decompress(const string& inputFile, const string& outputFile) {
                 field = 2 * (field - firstQuarter) + readNextBit(input);
             }
         }
+
+        /*auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = end - start;
+        stat << "Decompression time: " << elapsed.count() << " s\n";*/
     } else {
         cerr << "Error opening one of the files: " << inputFile << ", " << outputFile << endl;
     }
@@ -271,10 +291,15 @@ int main(int argc, char* argv[]) {
     string inputFile = argv[2];
     string outputFile = argv[3];
 
+    //stat << inputFile;
+
     if (operation == "c") {
+        //stat << " -c" << endl;
         compress(inputFile, outputFile);
     } else if (operation == "d") {
+        //stat << " -d" << endl;
         decompress(inputFile, outputFile);
+        //stat << endl;
     }
 
     return 0;
