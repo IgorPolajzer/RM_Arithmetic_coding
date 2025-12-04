@@ -7,6 +7,8 @@
 using namespace std;
 using namespace tsl;
 
+const char DELIMITER = '\0';
+
 struct TableEntry {
     char character;
     mutable int frequency;
@@ -14,33 +16,40 @@ struct TableEntry {
     mutable int upperBound;
 };
 
+uint64_t string_to_uint64(string str) {
+    stringstream stream(str);
+    uint64_t result;
+    stream >> result;
+    return result;
+}
+
 ordered_map<char, TableEntry> initalizeTable(const string& fileName) {
     char c;
     ordered_map<char, TableEntry> table;
     ifstream file(fileName, ios::binary | ios::in);
-    int lowerBound = 0;
 
-    while (file.get(c))
-    {
+    // Count frequencies
+    while (file.get(c)) {
         if(!table.contains(c)) {
-            int frequency = 1;
-            int upperBound = lowerBound + frequency;
-
-            table[c] = TableEntry(c, frequency, lowerBound, upperBound);
-            lowerBound = upperBound;
-
+            table[c] = TableEntry{c, 1, 0, 0};
         } else {
             table[c].frequency++;
-            table[c].upperBound++;
-            lowerBound = table[c].upperBound;
         }
+    }
+
+    // Calculate bounds
+    int cumulativeFreq = 0;
+    for (auto & it : table) {
+        it.second.lowerBound = cumulativeFreq;
+        cumulativeFreq += it.second.frequency;
+        it.second.upperBound = cumulativeFreq;
     }
 
     return table;
 }
 
-int getComulativeFrequency(const ordered_map<char, TableEntry>& table) {
-    int frequency = 0;
+uint64_t getComulativeFrequency(const ordered_map<char, TableEntry>& table) {
+    uint64_t frequency = 0;
 
     for (const auto & [ key, value ] : table) {
         frequency += value.frequency;
@@ -57,26 +66,35 @@ void compress(const string& inputFile, const string& outputFile) {
     cout << "Specify the coder bitsize: ";
     cin >> bitSize;
 
-    int lowerBound = 0;
-    int upperBound = pow(2, bitSize - 1) - 1;
-    int secondQuarter = (upperBound + 1) / 2;
-    int firstQuarter = secondQuarter / 2;
-    int thirdQuarter = firstQuarter * 3;
+    uint64_t lowerBound = 0;
+    uint64_t upperBound = (1ULL << (bitSize - 1)) - 1; //pow(2, bitSize - 1) - 1;
+    uint64_t secondQuarter = (upperBound + 1) / 2;
+    uint64_t firstQuarter = secondQuarter / 2;
+    uint64_t thirdQuarter = firstQuarter * 3;
 
     ordered_map<char, TableEntry> table = initalizeTable(inputFile);
-    int cummulativeFrequency = getComulativeFrequency(table);
+    uint64_t cummulativeFrequency = getComulativeFrequency(table);
 
     if (input.is_open() && output.is_open()) {
         // Write file header.
-        output << bitSize << ",";
-        for (auto & it : table) {output << it.first << ",";}
-        for (auto & it : table) {output << it.second.frequency << ",";}
+        output << bitSize;
+        output.write(&DELIMITER, 1);
+        for (auto & it : table) {
+            output.write(&it.first, 1);
+            output.write(&DELIMITER, 1);
+        }
+        output.write(&DELIMITER, 1); // To mark the beginning of frequencies.
+        for (auto & it : table) {
+            output << it.second.frequency;
+            output.write(&DELIMITER, 1);
+        }
+        output.write(&DELIMITER, 1); // To mark beginning of body.
 
         char c;
         int E3_counter = 0;
 
         while (input.get(c)) {
-            int step = (upperBound - lowerBound + 1) / cummulativeFrequency;
+            uint64_t step = (upperBound - lowerBound + 1) / cummulativeFrequency;
             upperBound = lowerBound + step * table[c].upperBound - 1;
             lowerBound = lowerBound + step * table[c].lowerBound;
 
@@ -135,11 +153,16 @@ ordered_map<char, TableEntry> parseHeader(ifstream& input, int &bitSize) {
     }
     bitSize = stoi(stringBitSize);
 
-    // Parse used characters (all non-digits)
+    // Parse used characters
     while (true) {
-        if (!isalpha(input.peek()) && input.peek() != ',') break; // stop at first non-letter/non-comma
         input.get(c);
-        if (c == ',') continue;
+        if (c == DELIMITER) {
+            if (input.peek() == DELIMITER) {
+                input.get();
+                break;
+            }
+            continue;
+        }
         table[c] = TableEntry{c, -1, -1, -1};
     }
 
@@ -147,13 +170,18 @@ ordered_map<char, TableEntry> parseHeader(ifstream& input, int &bitSize) {
     int previousUpper = -1;
     for (auto & it : table) {
         string freqStr;
-        while (input.get(c) && c != ',') {
+        // Parse and concat character frequencies.
+        while (true) {
+            input.get(c);
+            if (c == DELIMITER) {
+                break;
+            }
             freqStr += c;
         }
 
-        int currentFreq = stoi(freqStr);
-        int lowerBound = previousUpper == -1 ? 0 : previousUpper;
-        int upperBound = lowerBound + currentFreq;
+        uint16_t currentFreq = string_to_uint64(freqStr);
+        uint64_t lowerBound = previousUpper == -1 ? 0 : previousUpper;
+        uint64_t upperBound = lowerBound + currentFreq;
 
         it.second.frequency = currentFreq;
         it.second.lowerBound = lowerBound;
@@ -161,6 +189,7 @@ ordered_map<char, TableEntry> parseHeader(ifstream& input, int &bitSize) {
 
         previousUpper = upperBound;
     }
+    input.get(); // Consume delimiter.
 
     return table;
 }
@@ -190,22 +219,22 @@ void decompress(const string& inputFile, const string& outputFile) {
         // Parse the file header.
         int bitSize;
         ordered_map<char, TableEntry> table = parseHeader(input, bitSize);
-        int cummulativeFrequency = getComulativeFrequency(table);
+        uint64_t cummulativeFrequency = getComulativeFrequency(table);
 
-        int field = 0;
+        uint64_t field = 0;
         for (int i = 0; i < bitSize - 1; i++ ) field = ( field << 1 ) | readNextBit(input);
 
-        int lowerBound = 0;
-        int upperBound = pow(2, bitSize - 1) - 1;
-        int secondQuarter = (upperBound + 1) / 2;
-        int firstQuarter = secondQuarter / 2;
-        int thirdQuarter = firstQuarter * 3;
+        uint64_t lowerBound = 0;
+        uint64_t upperBound = (1ULL << (bitSize - 1)) - 1; //pow(2, bitSize - 1) - 1;
+        uint64_t secondQuarter = (upperBound + 1) / 2;
+        uint64_t firstQuarter = secondQuarter / 2;
+        uint64_t thirdQuarter = firstQuarter * 3;
 
-        for (int i = 0; i < cummulativeFrequency; i++) {
-            int step = (upperBound - lowerBound + 1) / cummulativeFrequency;
-            int v = (field - lowerBound) / step;
+        for (uint64_t i = 0; i < cummulativeFrequency; i++) {
+            uint64_t step = (upperBound - lowerBound + 1) / cummulativeFrequency;
+            uint64_t v = (field - lowerBound) / step;
             char currentChar = getCharFromTable(table, v);
-            output << currentChar;
+            output.write(&currentChar, 1);
 
             upperBound = lowerBound + step * table[currentChar].upperBound - 1;
             lowerBound = lowerBound + step * table[currentChar].lowerBound;
