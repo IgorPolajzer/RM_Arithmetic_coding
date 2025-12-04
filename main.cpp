@@ -1,13 +1,9 @@
-#include <complex>
 #include <iostream>
 #include <fstream>
-#include <cmath>
 #include <tsl/ordered_map.h>
 
 using namespace std;
 using namespace tsl;
-
-const char DELIMITER = '\0';
 
 struct TableEntry {
     char character;
@@ -16,11 +12,37 @@ struct TableEntry {
     mutable int upperBound;
 };
 
-uint64_t string_to_uint64(string str) {
-    stringstream stream(str);
-    uint64_t result;
-    stream >> result;
-    return result;
+unsigned char bitBuffer = 0;
+int bitCount = 0;
+
+void writeBit(ofstream& output, int bit) {
+    bitBuffer = (bitBuffer << 1) | (bit & 1);
+    bitCount++;
+    if (bitCount == 8) {
+        output.write((char*)&bitBuffer, 1);
+        bitBuffer = 0;
+        bitCount = 0;
+    }
+}
+
+void flushBits(ofstream& output) {
+    if (bitCount > 0) {
+        bitBuffer <<= (8 - bitCount);
+        output.write((char*)&bitBuffer, 1);
+        bitBuffer = 0;
+        bitCount = 0;
+    }
+}
+
+int readNextBit(ifstream& input) {
+    if (bitCount == 0) {
+        input.read((char*)&bitBuffer, 1);
+        bitCount = 8;
+    }
+    int bit = (bitBuffer >> 7) & 1;
+    bitBuffer <<= 1;
+    bitCount--;
+    return bit;
 }
 
 ordered_map<char, TableEntry> initalizeTable(const string& fileName) {
@@ -77,18 +99,18 @@ void compress(const string& inputFile, const string& outputFile) {
 
     if (input.is_open() && output.is_open()) {
         // Write file header.
-        output << bitSize;
-        output.write(&DELIMITER, 1);
+        output.write((char*)&bitSize, sizeof(bitSize));
+
+        int tableSize = table.size();
+        output.write((char*)&tableSize, sizeof(tableSize));
+
         for (auto & it : table) {
             output.write(&it.first, 1);
-            output.write(&DELIMITER, 1);
+            output.write((char*)&it.second.frequency, sizeof(it.second.frequency));
         }
-        output.write(&DELIMITER, 1); // To mark the beginning of frequencies.
-        for (auto & it : table) {
-            output << it.second.frequency;
-            output.write(&DELIMITER, 1);
-        }
-        output.write(&DELIMITER, 1); // To mark beginning of body.
+
+        bitBuffer = 0;
+        bitCount = 0;
 
         char c;
         int E3_counter = 0;
@@ -102,17 +124,17 @@ void compress(const string& inputFile, const string& outputFile) {
                 if (upperBound < secondQuarter) {
                     lowerBound *= 2;
                     upperBound = upperBound * 2 + 1;
-                    output << 0;
+                    writeBit(output, 0);
                     for (int i = 0; i < E3_counter; i++) {
-                        output << 1;
+                        writeBit(output, 1);
                     }
                     E3_counter = 0;
                 } else if (lowerBound >= secondQuarter) {
                     lowerBound = 2 * (lowerBound - secondQuarter);
                     upperBound = 2 * (upperBound - secondQuarter) + 1;
-                    output << 1;
+                    writeBit(output, 1);
                     for (int i = 0; i < E3_counter; i++) {
-                        output << 0;
+                        writeBit(output, 0);
                     }
                     E3_counter = 0;
                 }
@@ -126,70 +148,49 @@ void compress(const string& inputFile, const string& outputFile) {
         }
 
         if (lowerBound < firstQuarter) {
-            output << 0 << 1;
+            writeBit(output, 0);
+            writeBit(output, 1);
             for (int i = 0; i < E3_counter; i++) {
-                output << 1;
+                writeBit(output, 1);
             }
         } else {
-            output << 1 << 0;
+            writeBit(output, 1);
+            writeBit(output, 0);
             for (int i = 0; i < E3_counter; i++) {
-                output << 0;
+                writeBit(output, 0);
             }
         }
+
+        flushBits(output);
     } else {
         cerr << "Error opening one of the files: " << inputFile << ", " << outputFile << endl;
     }
 }
 
 ordered_map<char, TableEntry> parseHeader(ifstream& input, int &bitSize) {
-    char c;
-    string stringBitSize;
     ordered_map<char, TableEntry> table;
 
-    // Parse bit size (digits until first non-digit)
-    while (isdigit(input.peek())) {
-        input.get(c);
-        stringBitSize += c;
-    }
-    bitSize = stoi(stringBitSize);
+    // Read bit size.
+    input.read((char*)&bitSize, sizeof(bitSize));
 
-    // Parse used characters
-    while (true) {
-        input.get(c);
-        if (c == DELIMITER) {
-            if (input.peek() == DELIMITER) {
-                input.get();
-                break;
-            }
-            continue;
-        }
-        table[c] = TableEntry{c, -1, -1, -1};
-    }
+    // Read table size.
+    int tableSize;
+    input.read((char*)&tableSize, sizeof(tableSize));
 
-    // Parse character frequencies.
-    int previousUpper = -1;
-    for (auto & it : table) {
-        string freqStr;
-        // Parse and concat character frequencies.
-        while (true) {
-            input.get(c);
-            if (c == DELIMITER) {
-                break;
-            }
-            freqStr += c;
-        }
+    // Read character-frequency pairs.
+    int previousUpper = 0;
+    for (int i = 0; i < tableSize; i++) {
+        char c;
+        int freq;
+        input.read(&c, 1);
+        input.read((char*)&freq, sizeof(freq));
 
-        uint16_t currentFreq = string_to_uint64(freqStr);
-        uint64_t lowerBound = previousUpper == -1 ? 0 : previousUpper;
-        uint64_t upperBound = lowerBound + currentFreq;
+        int lowerBound = previousUpper;
+        int upperBound = lowerBound + freq;
 
-        it.second.frequency = currentFreq;
-        it.second.lowerBound = lowerBound;
-        it.second.upperBound = upperBound;
-
+        table[c] = TableEntry{c, freq, lowerBound, upperBound};
         previousUpper = upperBound;
     }
-    input.get(); // Consume delimiter.
 
     return table;
 }
@@ -200,15 +201,7 @@ char getCharFromTable(ordered_map<char, TableEntry>& table, int v) {
             return it.first;
         }
     }
-}
-
-int readNextBit(ifstream& input) {
-    char bit_char;
-    if (input.get(bit_char)) {
-        if (bit_char == '0') return 0;
-        if (bit_char == '1') return 1;
-    }
-    return 0;
+    return '\0';
 }
 
 void decompress(const string& inputFile, const string& outputFile) {
@@ -220,6 +213,9 @@ void decompress(const string& inputFile, const string& outputFile) {
         int bitSize;
         ordered_map<char, TableEntry> table = parseHeader(input, bitSize);
         uint64_t cummulativeFrequency = getComulativeFrequency(table);
+
+        bitBuffer = 0;
+        bitCount = 0;
 
         uint64_t field = 0;
         for (int i = 0; i < bitSize - 1; i++ ) field = ( field << 1 ) | readNextBit(input);
